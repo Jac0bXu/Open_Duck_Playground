@@ -113,6 +113,7 @@ class MJInferBase:
         self.gravity_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_SENSOR, "upvector"
         )
+        self.gravity_addr = self.model.sensor_adr[self.gravity_id]
         self.gravity_dimensions = 3
 
         self.init_pos = np.array(
@@ -253,7 +254,7 @@ class MJInferBase:
 
     def get_gravity(self, data):
         return data.sensordata[
-            self.gravity_id : self.gravity_id + self.gravity_dimensions
+            self.gravity_addr : self.gravity_addr + self.gravity_dimensions
         ]
 
     def check_contact(self, data, body1_name, body2_name):
