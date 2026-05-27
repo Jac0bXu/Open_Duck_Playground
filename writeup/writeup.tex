@@ -228,6 +228,13 @@ The diffusion policy failure is a textbook illustration of behavior cloning's li
 The most valuable outcome of this project is not any single result but the understanding of \emph{where} each method breaks down and \emph{why}. For future work, the path forward is clear: SysID to close the sim-to-real gap, real2sim2real loops for iterative refinement, and DPPO to combine diffusion's expressive action representation with RL's corrective feedback for bipedal locomotion.
 
 
+\section{Outlook}
+
+It is unfortunate that constraints prevented going further on this project at this point. However, this work was conceived as a warm-up for a larger effort: a planned collaboration on hierarchical multi-agent policies for a team of four Open Duck robots, where the lessons learned here---about sim-to-real gaps, hardware pitfalls, and policy-class selection---will directly inform the multi-agent setting.
+
+More broadly, the intuitions built through this project transfer across embodiments. Future work will apply these lessons on different platforms, including quadrupedal locomotion on the Boston Dynamics Spot and bimanual manipulation on Franka arms. The core insights are embodiment-agnostic: system identification matters more than domain randomization, closed-loop feedback is essential for unstable systems, and honest failure analysis accelerates learning more than selective success reporting.
+
+
 \begin{ack}
 We thank the Open Duck Mini community and the original author (Antoine Pirrone) for the open-source hardware design, training pipeline, and reference policies.
 \end{ack}
