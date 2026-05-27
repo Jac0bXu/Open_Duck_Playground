@@ -81,15 +81,27 @@ def make_ppo_policy(onnx_path: str) -> Callable[[np.ndarray], np.ndarray]:
 
 
 def make_diffusion_policy(checkpoint_path: str, obs_horizon: int = 2) -> Callable:
-    """Load a trained diffusion policy checkpoint and return an infer callable.
+    """Load a trained diffusion policy checkpoint and return an infer callable."""
+    import torch
+    from diffusion.model import DiffusionPolicy
 
-    Placeholder — replace body with actual ConditionalUnet1D + DDIM sampler
-    once diffusion/model.py is implemented.
-    """
-    raise NotImplementedError(
-        "Diffusion policy not yet implemented.  "
-        "Run with --onnx for PPO-based integration testing."
-    )
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    model = DiffusionPolicy(obs_horizon=obs_horizon)
+    model.load_state_dict(ckpt["model_state"])
+    model.set_normalizer(ckpt["action_min"], ckpt["action_max"])
+    model.eval()
+
+    device = torch.device("cpu")
+
+    def _infer(obs_stack: np.ndarray) -> np.ndarray:
+        # obs_stack: (obs_horizon, obs_dim)
+        obs_t = torch.from_numpy(obs_stack).float().unsqueeze(0)  # (1, obs_h, obs_dim)
+        obs_flat = obs_t.view(1, -1)
+        with torch.no_grad():
+            action_chunk = model.predict_action(obs_flat)          # (1, chunk_size, action_dim)
+        return action_chunk.squeeze(0).numpy()                     # (chunk_size, action_dim)
+
+    return _infer
 
 
 # ── server ────────────────────────────────────────────────────────────────────
