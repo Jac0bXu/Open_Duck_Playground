@@ -6,13 +6,14 @@
 \usepackage{url}
 \usepackage{booktabs}
 \usepackage{amsfonts}
+\usepackage{amsmath}
 \usepackage{nicefrac}
 \usepackage{microtype}
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{enumitem}
 
-\title{Lessons from Sim-to-Real on a 15-DOF Bipedal Robot:\\Hardware Pitfalls, Reward Overfitting, and the Failure of BC Diffusion Policy}
+\title{Lessons from Sim-to-Real on a 15-DOF Bipedal Robot:\\Hardware Realities, Reward Brittleness, and the Limits of BC Diffusion for Locomotion}
 
 \author{%
   Jacob Xu \\
@@ -23,7 +24,7 @@
 \maketitle
 
 \begin{abstract}
-We present a reflective account of working with the Open Duck Mini V2, a low-cost 15-DOF bipedal robot. The work spanned hardware assembly, PPO policy training in MuJoCo MJX, sim-to-real transfer attempts, and an application of Diffusion Policy via behavior cloning from PPO rollouts. The central outcomes are negative: a PPO policy that dominates in simulation (beating the author-provided baseline on 11/14 metrics) fails to transfer to hardware, and a BC diffusion policy fails catastrophically even in simulation (98\% fall rate). Rather than presenting these as successes, we analyze where each stage broke down. We identify three root causes: (1) hardware assembly errors that created unmodeled dynamics, (2) reward overfitting in simulation without real-world validation, and (3) the fundamental unsuitability of offline behavior cloning for unstable bipedal locomotion. We conclude with concrete recommendations---system identification, real-world data collection, and DPPO---that would address each failure mode.
+We present a reflective account of working with the Open Duck Mini V2, a low-cost 15-DOF bipedal robot. The work spanned hardware assembly, PPO policy training in MuJoCo MJX, sim-to-real transfer attempts, and an application of Diffusion Policy via behavior cloning from PPO rollouts. The central outcomes are negative: a PPO policy that dominates in simulation (beating the author-provided baseline on 11/14 metrics) fails to transfer to hardware, and a BC diffusion policy fails catastrophically even in simulation (98\% fall rate). Rather than presenting these as successes, we analyze where each stage broke down. We identify three root causes: (1) hardware assembly errors that created unmodeled dynamics, (2) reward overfitting in simulation without real-world validation, and (3) the inadequacy of offline BC-from-distillation for unstable bipedal locomotion without corrective feedback. We conclude with concrete recommendations---system identification, real-world data collection, and DPPO---that would address each failure mode.
 \end{abstract}
 
 
@@ -57,7 +58,7 @@ Our contributions are:
 
 \paragraph{Diffusion Policy.} Diffusion Policy \citep{chi2023diffusion} applies denoising diffusion models to visuomotor policy learning, demonstrating strong performance on manipulation tasks. DPPO \citep{ren2024dppo} extends this by using a diffusion policy as the policy class within a PPO objective, combining diffusion's expressive action representation with RL's corrective feedback loop.
 
-\paragraph{Behavior cloning limitations.} The compounding error problem in BC was formalized by \citet{ross2011dagger}, who showed that BC policies can degrade quadratically with horizon due to distribution shift. This is well-understood in the literature but has been primarily studied in manipulation and driving; our work demonstrates how severely it manifests in bipedal locomotion, where even small errors lead to unrecoverable falls.
+\paragraph{Behavior cloning limitations.} The compounding error problem in BC was formalized by \citet{ross2011dagger}. We discuss this in detail in Section~\ref{sec:bc_analysis} in the context of our empirical results.
 
 
 \section{The Platform}
@@ -69,7 +70,7 @@ The robot's appeal is its low cost and open-source toolchain. The challenge is t
 The observation space is 101-dimensional: gyroscope (3), accelerometer (3), velocity command (7), joint angles minus defaults (14), joint velocities (14), three steps of action history ($3 \times 14$), motor targets (14), foot contacts (2), and gait phase (2). The action space is 14-dimensional: position offsets applied as $\text{motor\_targets} = \text{default} + \text{action} \times 0.25$. The policy runs at 50\,Hz (20\,ms control period) with physics at 500\,Hz.
 
 
-\section{Hardware Assembly Mistakes}
+\section{Hardware Lessons}
 
 \subsection{Missing Loctite on Actuator Screws}
 
@@ -171,6 +172,7 @@ Only 20\% of episodes survived even the \texttt{stand} command. All motion comma
 
 
 \subsection{Analysis: Why BC Diffusion Fails on Bipedal Locomotion}
+\label{sec:bc_analysis}
 
 \paragraph{Compounding error (distribution shift).}
 BC trains a mapping from observations to actions using expert data. At test time, any small prediction error causes the state to leave the training distribution. The next observation is now out-of-distribution, producing a worse action, compounding until the robot falls. This is the DAgger problem \citep{ross2011dagger}: BC policies are correct only on states visited by the expert, but must act on states produced by their own imperfect predictions.
@@ -230,9 +232,7 @@ The most valuable outcome of this project is not any single result but the under
 
 \section{Outlook}
 
-It is unfortunate that constraints prevented going further on this project at this point. However, this work was conceived as a warm-up for a larger effort: a planned collaboration on hierarchical multi-agent policies for a team of four Open Duck robots, where the lessons learned here---about sim-to-real gaps, hardware pitfalls, and policy-class selection---will directly inform the multi-agent setting.
-
-More broadly, the intuitions built through this project transfer across embodiments. Future work will apply these lessons on different platforms, including quadrupedal locomotion on the Boston Dynamics Spot and bimanual manipulation on Franka arms. The core insights are embodiment-agnostic: system identification matters more than domain randomization, closed-loop feedback is essential for unstable systems, and honest failure analysis accelerates learning more than selective success reporting.
+This project concluded earlier than intended due to time constraints. However, the lessons learned here directly inform ongoing and planned work. The immediate next step is a collaborative project on hierarchical multi-agent policies for a team of four Open Duck robots, where the sim-to-real insights and policy-class comparisons from this warm-up project will be applied in a multi-agent setting. Beyond this, the core takeaways---that system identification matters more than domain randomization, that closed-loop feedback is essential for unstable systems, and that honest failure analysis accelerates learning---transfer across embodiments to upcoming work on quadrupedal locomotion and bimanual manipulation.
 
 
 \begin{ack}
