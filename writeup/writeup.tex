@@ -28,7 +28,7 @@
 \maketitle
 
 \begin{abstract}
-We present a reflective account of working with the Open Duck Mini V2, a low-cost 15-DOF bipedal robot. The work spanned hardware assembly, PPO policy training in MuJoCo MJX, sim-to-real transfer attempts, and an application of Diffusion Policy via behavior cloning from PPO rollouts. The central outcomes are negative: a PPO policy that dominates in simulation (beating the author-provided baseline on 11/14 metrics) fails to transfer to hardware, and a BC diffusion policy fails catastrophically even in simulation (98\% fall rate). Rather than presenting these as successes, we analyze where each stage broke down. We identify three root causes: (1) hardware assembly errors that created unmodeled dynamics, (2) reward overfitting in simulation without real-world validation, and (3) the inadequacy of offline BC-from-distillation for unstable bipedal locomotion without corrective feedback. We conclude with concrete recommendations---system identification, real-world data collection, and DPPO---that would address each failure mode.
+We present a reflective account of working with the Open Duck Mini V2, a low-cost 15-DOF bipedal robot. The work spanned hardware assembly, PPO policy training in MuJoCo MJX, sim-to-real transfer attempts, behavior cloning of a Diffusion Policy from PPO rollouts, and on-policy refinement via DPPO. The central outcomes are largely negative: a PPO policy that dominates in simulation (beating the author-provided baseline on 11/14 metrics) fails to transfer to hardware; a BC diffusion policy fails catastrophically even in simulation (100\% fall rate); and DPPO, while tripling survival time over BC, still fails to produce a stable walker (100\% fall rate). Rather than presenting selective successes, we analyze where each stage broke down. We identify root causes in hardware assembly errors, reward overfitting in simulation, and the difficulty of adapting diffusion-based methods to bipedal locomotion. We conclude with concrete recommendations---system identification, real-world data collection, and curriculum training---for making progress on this class of problems.
 \end{abstract}
 
 
@@ -36,23 +36,24 @@ We present a reflective account of working with the Open Duck Mini V2, a low-cos
 
 Sim-to-real transfer remains one of the central challenges in robot learning. The promise is compelling: train policies endlessly in simulation at zero marginal cost, then deploy on hardware. In practice, the gap between simulated and real dynamics---the \emph{sim-to-real gap}---makes this transfer fragile, especially for inherently unstable systems like bipedal robots.
 
-This paper recounts a hands-on project with the Open Duck Mini V2, a small, low-cost ($\sim$\$200) bipedal robot with 15 degrees of freedom. The work progressed through four stages:
+This paper recounts a hands-on project with the Open Duck Mini V2, a small, low-cost ($\sim$\$200) bipedal robot with 15 degrees of freedom. The work progressed through five stages:
 
 \begin{enumerate}[nosep]
   \item \textbf{Hardware assembly} of the physical robot from a kit
   \item \textbf{PPO policy training} in MuJoCo MJX, iterated over 28 experiments
   \item \textbf{Sim-to-real transfer} attempts with the trained policies
   \item \textbf{Diffusion Policy} via behavior cloning from PPO rollouts
+  \item \textbf{DPPO} fine-tuning of the BC diffusion policy with on-policy RL
 \end{enumerate}
 
-Each stage produced a negative result or an instructive failure. The trained PPO policy beat the original author's baseline on 11 of 14 simulation metrics but performed poorly on hardware. The BC diffusion policy achieved a 98\% fall rate in simulation. Rather than presenting selective successes, we document these failures honestly and analyze their root causes. We believe this kind of failure analysis is underrepresented in the literature and is often more instructive than success stories.
+Each stage produced a negative result or an instructive failure. The trained PPO policy beat the original author's baseline on 11 of 14 simulation metrics but performed poorly on hardware. The BC diffusion policy achieved a 100\% fall rate in simulation. DPPO improved over BC---surviving $2.5\times$ longer and accumulating $3\times$ more reward---but still fell in every episode. Rather than presenting selective successes, we document these failures honestly and analyze their root causes. We believe this kind of failure analysis is underrepresented in the literature and is often more instructive than success stories.
 
 Our contributions are:
 \begin{itemize}[nosep]
   \item A detailed analysis of how hardware assembly errors (missing Loctite, mis-initialized joints) create sim-to-real gaps that domain randomization cannot close
   \item A case study in reward overfitting: a policy that dominates in simulation but fails on hardware
-  \item An empirical demonstration that BC-from-distillation fails catastrophically on bipedal locomotion, with analysis of why---and how this differs from the manipulation setting where Diffusion Policy succeeds
-  \item Concrete recommendations for future work: system identification, real2sim2real loops, and DPPO
+  \item An empirical demonstration that BC-from-distillation fails catastrophically on bipedal locomotion, and that DPPO---while directionally correct---is insufficient in this regime without further engineering
+  \item Concrete recommendations for future work: system identification, real2sim2real loops, and curriculum training
 \end{itemize}
 
 
@@ -94,6 +95,7 @@ For a biped, this matters more than it might seem. The head assembly has non-tri
 
 
 \section{PPO Policy Training}
+\label{sec:ppo}
 
 \subsection{Training Pipeline}
 
@@ -191,6 +193,62 @@ Distilling from a single PPO policy produces a unimodal action distribution. The
 This failure highlights a fundamental distinction between locomotion and manipulation. Diffusion Policy was demonstrated on manipulation tasks where small action errors are recoverable---a slightly misaligned gripper can be corrected on the next step. In bipedal locomotion, the state space is far less forgiving: a small error in foot placement can cause an unrecoverable fall within one or two steps. This is precisely why DPPO \citep{ren2024dppo}, which combines diffusion's expressive action representation with RL's corrective feedback, is the natural next step for locomotion.
 
 
+\section{DPPO: On-Policy Refinement of the BC Diffusion Policy}
+\label{sec:dppo}
+
+\subsection{Motivation}
+
+The BC diffusion policy's failure is attributable to distribution shift and the lack of corrective feedback. DPPO \citep{ren2024dppo} addresses this by using the diffusion model as the policy class within an on-policy PPO objective: the policy collects rollouts in the environment, receives reward signals, and updates via policy gradient. This provides the corrective feedback that BC lacks.
+
+\subsection{Setup}
+
+We initialized the DPPO policy from the BC diffusion checkpoint and trained for 500 iterations using the DPPO reference implementation adapted to the Open Duck environment.
+
+\begin{itemize}[nosep]
+  \item \textbf{Initialization:} BC diffusion policy (ConditionalUnet1D, converted to DPPO format)
+  \item \textbf{Training:} 500 iterations, 20 parallel environments, 200 steps per iteration ($\sim$8 min/iteration on Vast.ai RTX 3090)
+  \item \textbf{Domain randomization:} random pushes (0.3--1.5\,N every 80--160 steps), random friction ($0.5\text{--}1.5\times$), random initial joint noise, random yaw
+  \item \textbf{Wrappers:} observation/action normalization, multi-step wrapper (2 obs steps, 4 action steps)
+  \item \textbf{Evaluation:} 10 episodes per checkpoint, max 1000 steps (20\,s at 50\,Hz), seed\,=\,42
+\end{itemize}
+
+\subsection{Results}
+
+Both BC and DPPO fall in every episode (100\% fall rate). However, DPPO produces meaningful improvement in survival time and cumulative reward, as shown in Table~\ref{tab:dppo_results}.
+
+\begin{table}[t]
+\caption{Sim evaluation: BC baseline vs.\ DPPO (best checkpoint, iteration 300). Both policies fall in every episode, but DPPO survives $2.5\times$ longer and accumulates $3\times$ more reward.}
+\label{tab:dppo_results}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Metric & BC Baseline & DPPO (itr 300) & Delta \\
+\midrule
+Fall rate & 100\% & 100\% & $-$ \\
+Avg reward & $1368 \pm 224$ & $3992 \pm 2189$ & $+2.9\times$ \\
+Avg survival (env steps) & $\sim$56 & $\sim$144 & $+2.6\times$ \\
+Best episode reward & 1918 & 8191 & $+4.3\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The best checkpoint (iteration 300) achieved eval reward of 4009, up from the BC baseline of $\sim$3009. Later iterations showed degradation (3100--3810 range), suggesting overtraining.
+
+\subsection{Analysis}
+
+\paragraph{DPPO helps but is not enough.}
+The $3\times$ reward improvement and $2.6\times$ survival improvement confirm that on-policy RL feedback addresses some of BC's weaknesses. The policy learns to delay falls by producing more stable initial actions. However, $2.9$\,s of average survival in a 20\,s episode is far from a working walker. The core difficulty remains: bipedal balance is a narrow-waist problem where compounding errors quickly lead to unrecoverable states, and 500 iterations of DPPO do not provide enough exploration to learn robust recovery behaviors.
+
+\paragraph{High variance.}
+The reward standard deviation for DPPO ($\pm 2189$, or $\sim$55\% of the mean) is much larger than for BC ($\pm 224$, or $\sim$16\%). This suggests the policy is highly sensitive to initial conditions and perturbations---it sometimes finds a stable trajectory briefly, but cannot consistently reproduce it.
+
+\paragraph{Training instability.}
+The degradation after iteration 300 (from 4009 to 3100--3810) is consistent with the reward overfitting pattern observed in PPO training (Section~\ref{sec:ppo}): the policy overfits to the training distribution and loses robustness. For DPPO, this may be exacerbated by the diffusion policy's high-dimensional action space making the optimization landscape more rugged.
+
+\paragraph{Action chunking mismatch.}
+The DPPO implementation uses 4 action steps per multi-step, while the original BC policy was trained with 16-step chunks. This architectural mismatch may limit how well the BC initialization transfers to the DPPO fine-tuning regime. A matched chunk size could improve results.
+
+
 \section{What We Would Do Differently}
 
 \subsection{System Identification Before Training}
@@ -218,20 +276,20 @@ With more time, we would set up a data collection pipeline on the real robot:
 
 This is the ``real2sim2real'' loop that has become standard in modern robot learning. Even a small amount of real-world data is more valuable for closing the sim-to-real gap than any amount of simulated data.
 
-\subsection{DPPO Instead of BC Diffusion}
+\subsection{Curriculum Training for Diffusion Policies}
 
-For the diffusion policy work, the correct approach would be DPPO \citep{ren2024dppo}, which uses a diffusion model within an on-policy RL objective. This addresses both the compounding error problem (RL provides corrective feedback) and the unimodal teacher limitation (the policy explores diverse recovery behaviors). BC-from-distillation is a reasonable starting point for manipulation where errors are non-catastrophic, but it is the wrong tool for bipedal locomotion.
+Our DPPO results (Section~\ref{sec:dppo}) show that naive on-policy refinement from a BC initialization is insufficient for bipedal locomotion. A more promising approach would be curriculum training: start without domain randomization to let the policy learn basic balance, then gradually introduce perturbations and velocity commands. This mirrors the curriculum used in standard PPO training, where the agent first learns to stand before learning to walk.
 
 
 \section{Conclusion}
 
-This project produced two negative results: a PPO policy that excels in simulation but fails on hardware, and a BC diffusion policy that fails even in simulation. Both failures are informative.
+This project produced three negative results: a PPO policy that excels in simulation but fails on hardware, a BC diffusion policy that fails even in simulation, and a DPPO policy that improves over BC but still cannot walk. All three failures are informative.
 
 The sim-to-real gap was dominated by hardware issues (loose screws, mis-initialized joints) that domain randomization cannot fix. The correct response to a systematic sim-to-real gap is not more randomization but better modeling---system identification to bring the simulated dynamics closer to reality.
 
-The diffusion policy failure is a textbook illustration of behavior cloning's limitations on unstable systems. It reinforces the principle that locomotion requires closed-loop corrective feedback, whether from RL (PPO, DPPO) or from real-world data. BC is well-suited for tasks where small errors are recoverable; bipedal walking is not such a task.
+The diffusion policy experiments---BC and DPPO---paint a sobering picture of applying diffusion-based methods to bipedal locomotion. BC fails due to distribution shift and lack of corrective feedback. DPPO provides that feedback and improves survival by $2.5\times$, but remains far from producing a stable walker. The difficulty is not just the policy class or the training objective; it is the inherent instability of bipedal balance, where small errors compound rapidly into unrecoverable falls.
 
-The most valuable outcome of this project is not any single result but the understanding of \emph{where} each method breaks down and \emph{why}. For future work, the path forward is clear: SysID to close the sim-to-real gap, real2sim2real loops for iterative refinement, and DPPO to combine diffusion's expressive action representation with RL's corrective feedback for bipedal locomotion.
+The most valuable outcome of this project is not any single result but the understanding of \emph{where} each method breaks down and \emph{why}. For future work, the path forward requires: SysID to close the sim-to-real gap, curriculum training to progressively build difficulty for diffusion policies, and real2sim2real loops to ground simulated training in real-world dynamics.
 
 
 \section{Outlook}
